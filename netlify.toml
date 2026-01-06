@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "build"
+
+[functions]
+  node_bundler = "esbuild" # Giúp bundle code nhanh hơn
+
+# Redirect để gọi API thân thiện hơn
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
