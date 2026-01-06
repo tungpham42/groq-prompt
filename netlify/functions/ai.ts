@@ -26,7 +26,7 @@ const CORS_HEADERS = {
 async function generateWithFallback(
   prompt: string,
   index = 0
-): Promise<{ response: string; used_model: string }> {
+): Promise<{ result: string; used_model: string }> {
   // BASE CASE: All models failed
   if (index >= MODELS.length) {
     throw new Error(
@@ -43,12 +43,12 @@ async function generateWithFallback(
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: currentModel,
-      temperature: 0.7,
-      max_tokens: 1024,
+      temperature: 0.8,
+      max_tokens: 4096,
     });
 
     return {
-      response: chatCompletion.choices[0]?.message?.content || "",
+      result: chatCompletion.choices[0]?.message?.content || "",
       used_model: currentModel,
     };
   } catch (error: any) {
