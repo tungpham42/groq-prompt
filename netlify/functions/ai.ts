@@ -21,22 +21,27 @@ const CORS_HEADERS = {
 };
 
 /**
+ * Utility to pause execution for a set time (ms)
+ */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
  * Recursive function to attempt generation with a list of models.
  */
 async function generateWithFallback(
   prompt: string,
-  index = 0
+  index = 0,
 ): Promise<{ result: string; used_model: string }> {
   // BASE CASE: All models failed
   if (index >= MODELS.length) {
     throw new Error(
-      "All AI models failed due to rate limits, server errors, or invalid model names."
+      "All AI models failed due to rate limits, server errors, or invalid model names.",
     );
   }
 
   const currentModel = MODELS[index];
   console.log(
-    `[Attempt ${index + 1}/${MODELS.length}] Using model: ${currentModel}`
+    `[Attempt ${index + 1}/${MODELS.length}] Using model: ${currentModel}`,
   );
 
   try {
@@ -56,22 +61,30 @@ async function generateWithFallback(
 
     // ERROR LOGGING
     console.warn(
-      `[Fail] Model ${currentModel} failed. Status: ${status}. Message: ${error.message}`
+      `[Fail] Model ${currentModel} failed. Status: ${status}. Message: ${error.message}`,
     );
 
     // RECURSIVE SWITCH LOGIC
-    // We switch on:
-    // 429: Rate Limit
-    // 5xx: Server Errors
-    // 404: Model Not Found (Crucial if a model ID is typo'd or deprecated)
-    // 400: Bad Request (Sometimes context window issues)
     if (
       status === 429 ||
       status === 404 ||
       status === 400 ||
       (status >= 500 && status < 600)
     ) {
-      console.log(`>>> Switching to next model...`);
+      // SPECIAL HANDLING FOR RATE LIMITS (429)
+      if (status === 429) {
+        // Parse 'retry-after' header (usually in seconds) or default to 1 second
+        const retryHeader = error?.headers?.["retry-after"];
+        const waitTime = retryHeader ? parseInt(retryHeader) * 1000 : 1000;
+
+        console.log(
+          `[Rate Limit] Waiting ${waitTime}ms before switching models...`,
+        );
+        await sleep(waitTime);
+      } else {
+        console.log(`>>> Switching to next model...`);
+      }
+
       return await generateWithFallback(prompt, index + 1);
     }
 
