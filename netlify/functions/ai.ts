@@ -8,10 +8,11 @@ const groq = new Groq({
 
 // Priority Queue of Models (Updated to real Groq Model IDs)
 const MODELS = [
-  "openai/gpt-oss-120b", // 1. Primary High-Intelligence Model
-  "openai/gpt-oss-20b", // 2. High-Quality Fallback
-  "llama-3.3-70b-versatile", // 3. Fast/Efficient Fallback
-  "llama-3.1-8b-instant", // 4. "Last Resort" Instant Model
+  "meta-llama/llama-4-maverick-17b-128e-instruct", // 1. First Choice
+  "openai/gpt-oss-120b", // 2. Primary High-Intelligence Model
+  "openai/gpt-oss-20b", // 3. High-Quality Fallback
+  "llama-3.3-70b-versatile", // 4. Fast/Efficient Fallback
+  "llama-3.1-8b-instant", // 5. "Last Resort" Instant Model
 ];
 
 const CORS_HEADERS = {
