@@ -50,7 +50,7 @@ async function generateWithFallback(
       messages: [{ role: "user", content: prompt }],
       model: currentModel,
       temperature: 0.9,
-      max_tokens: 4096,
+      max_tokens: 6144,
     });
 
     return {
