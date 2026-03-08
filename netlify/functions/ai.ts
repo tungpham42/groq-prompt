@@ -1,6 +1,6 @@
 import { Handler } from "@netlify/functions";
 import Groq from "groq-sdk";
-import { EventEmitter } from "events"; // Import core module của Node.js
+import { EventEmitter } from "events";
 
 // Initialize Groq Client
 const groq = new Groq({
@@ -24,14 +24,13 @@ const CORS_HEADERS = {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ==========================================
-// 1. THIẾT LẬP EVENT BUS (PUB/SUB BROKER)
+// 1. EVENT BUS (PUB/SUB BROKER)
 // ==========================================
 const aiEventBus = new EventEmitter();
 
 // ==========================================
-// 2. SUBSCRIBERS (NGƯỜI ĐĂNG KÝ THEO DÕI)
+// 2. SUBSCRIBERS
 // ==========================================
-// Tách biệt hoàn toàn logic ghi log/telemetry ra khỏi logic chạy API
 aiEventBus.on("model:attempt", ({ index, model }) => {
   console.log(`[Attempt ${index + 1}/${MODELS.length}] Using model: ${model}`);
 });
@@ -55,7 +54,63 @@ aiEventBus.on("generation:success", ({ model }) => {
 });
 
 // ==========================================
-// 3. PUBLISHER (NGƯỜI PHÁT SỰ KIỆN)
+// 3. WEB SEARCH FUNCTION
+// ==========================================
+async function fetchWebContext(query: string): Promise<string> {
+  try {
+    const apiKey = process.env.TAVILY_API_KEY;
+    if (!apiKey) {
+      console.warn("Missing TAVILY_API_KEY. Skipping web search.");
+      return "";
+    }
+
+    console.log(`[Search] Querying Tavily for: "${query}"`);
+
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query: query,
+        search_depth: "advanced",
+        include_answer: true,
+        max_results: 5,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Tavily API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // Format the results into a clean string for the LLM
+    let context = "";
+    if (data.answer) {
+      context += `Summary Answer: ${data.answer}\n\n`;
+    }
+
+    if (data.results && data.results.length > 0) {
+      context += "Detailed Sources:\n";
+      context += data.results
+        .map(
+          (r: any) =>
+            `- Title: ${r.title}\n  URL: ${r.url}\n  Content: ${r.content}`,
+        )
+        .join("\n\n");
+    }
+
+    return context || "No highly relevant information found on the internet.";
+  } catch (error) {
+    console.error("Failed to fetch web data:", error);
+    return ""; // Return empty string so the chatbot still works using its base knowledge
+  }
+}
+
+// ==========================================
+// 4. PUBLISHER (LLM GENERATOR)
 // ==========================================
 async function generateWithFallback(
   prompt: string,
@@ -69,18 +124,16 @@ async function generateWithFallback(
 
   const currentModel = MODELS[index];
 
-  // PUBLISH SỰ KIỆN: Bắt đầu thử model
   aiEventBus.emit("model:attempt", { index, model: currentModel });
 
   try {
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: currentModel,
-      temperature: 0.9,
+      temperature: 1,
       max_tokens: 6144,
     });
 
-    // PUBLISH SỰ KIỆN: Thành công
     aiEventBus.emit("generation:success", { model: currentModel });
 
     return {
@@ -90,7 +143,6 @@ async function generateWithFallback(
   } catch (error: any) {
     const status = error.status || error.statusCode || 500;
 
-    // PUBLISH SỰ KIỆN: Model thất bại
     aiEventBus.emit("model:failed", {
       model: currentModel,
       status,
@@ -107,11 +159,9 @@ async function generateWithFallback(
         const retryHeader = error?.headers?.["retry-after"];
         const waitTime = retryHeader ? parseInt(retryHeader) * 1000 : 1000;
 
-        // PUBLISH SỰ KIỆN: Dính Rate limit
         aiEventBus.emit("model:rate_limit", { waitTime });
         await sleep(waitTime);
       } else {
-        // PUBLISH SỰ KIỆN: Chuyển model
         aiEventBus.emit("model:switching");
       }
 
@@ -123,7 +173,7 @@ async function generateWithFallback(
 }
 
 // ==========================================
-// 4. MAIN HTTP HANDLER
+// 5. MAIN HTTP HANDLER
 // ==========================================
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
@@ -167,7 +217,20 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    const result = await generateWithFallback(prompt);
+    // Step 1: Fetch web context based on the user's prompt
+    const webContext = await fetchWebContext(prompt);
+
+    // Step 2: Construct the final augmented prompt
+    let finalPrompt = prompt;
+    if (
+      webContext &&
+      webContext !== "No highly relevant information found on the internet."
+    ) {
+      finalPrompt = `You have been provided with the following live web context to help answer the user's query.\n\nWeb Context:\n${webContext}\n\nUser Query:\n${prompt}`;
+    }
+
+    // Step 3: Send to the LLM
+    const result = await generateWithFallback(finalPrompt);
 
     return {
       statusCode: 200,
