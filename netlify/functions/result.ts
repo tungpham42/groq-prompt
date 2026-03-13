@@ -4,7 +4,7 @@ import { EventEmitter } from "events";
 
 // Initialize Groq Client
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
+  apiKey: process.env.GROQ_API_KEY_RESULT,
 });
 
 const MODELS = [
