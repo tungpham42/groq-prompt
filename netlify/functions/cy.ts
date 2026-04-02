@@ -54,12 +54,68 @@ aiEventBus.on("generation:success", ({ model }) => {
 });
 
 // ==========================================
-// 3. PUBLISHER (LLM GENERATOR)
+// 3. WEB SEARCH FUNCTION
+// ==========================================
+async function fetchWebContext(query: string): Promise<string> {
+  try {
+    const apiKey = process.env.TAVILY_API_KEY_CY;
+    if (!apiKey) {
+      console.warn("Missing TAVILY_API_KEY_CY. Skipping web search.");
+      return "";
+    }
+
+    console.log(`[Search] Querying Tavily for: "${query}"`);
+
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query: query,
+        search_depth: "advanced",
+        include_answer: true,
+        max_results: 5,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Tavily API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    // Format the results into a clean string for the LLM
+    let context = "";
+    if (data.answer) {
+      context += `Summary Answer: ${data.answer}\n\n`;
+    }
+
+    if (data.results && data.results.length > 0) {
+      context += "Detailed Sources:\n";
+      context += data.results
+        .map(
+          (r: any) =>
+            `- Title: ${r.title}\n  URL: ${r.url}\n  Content: ${r.content}`,
+        )
+        .join("\n\n");
+    }
+
+    return context || "No highly relevant information found on the internet.";
+  } catch (error) {
+    console.error("Failed to fetch web data:", error);
+    return ""; // Return empty string so the chatbot still works using its base knowledge
+  }
+}
+
+// ==========================================
+// 4. PUBLISHER (LLM GENERATOR)
 // ==========================================
 async function generateWithFallback(
   prompt: string,
   index = 0,
-): Promise<{ result: string }> {
+): Promise<{ result: string; used_model: string }> {
   if (index >= MODELS.length) {
     throw new Error(
       "All AI models failed due to rate limits, server errors, or invalid model names.",
@@ -82,6 +138,7 @@ async function generateWithFallback(
 
     return {
       result: chatCompletion.choices[0]?.message?.content || "",
+      used_model: currentModel,
     };
   } catch (error: any) {
     const status = error.status || error.statusCode || 500;
@@ -116,7 +173,7 @@ async function generateWithFallback(
 }
 
 // ==========================================
-// 4. MAIN HTTP HANDLER
+// 5. MAIN HTTP HANDLER
 // ==========================================
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
@@ -160,8 +217,20 @@ export const handler: Handler = async (event) => {
       };
     }
 
-    // Step 1: Send to the LLM directly
-    const result = await generateWithFallback(prompt);
+    // Step 1: Fetch web context based on the user's prompt
+    const webContext = await fetchWebContext(prompt);
+
+    // Step 2: Construct the final augmented prompt
+    let finalPrompt = prompt;
+    if (
+      webContext &&
+      webContext !== "No highly relevant information found on the internet."
+    ) {
+      finalPrompt = `You have been provided with the following live web context to help answer the user's query.\n\nWeb Context:\n${webContext}\n\nUser Query:\n${prompt}`;
+    }
+
+    // Step 3: Send to the LLM
+    const result = await generateWithFallback(finalPrompt);
 
     return {
       statusCode: 200,
