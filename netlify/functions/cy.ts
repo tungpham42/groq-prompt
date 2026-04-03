@@ -130,8 +130,8 @@ async function generateWithFallback(
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: currentModel,
-      temperature: 1,
-      max_tokens: 6144,
+      temperature: 0.6,
+      max_tokens: 3000,
     });
 
     aiEventBus.emit("generation:success", { model: currentModel });
