@@ -131,7 +131,7 @@ async function generateWithFallback(
       messages: [{ role: "user", content: prompt }],
       model: currentModel,
       temperature: 1,
-      max_tokens: 6144,
+      max_tokens: 3000,
     });
 
     aiEventBus.emit("generation:success", { model: currentModel });
